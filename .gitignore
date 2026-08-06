@@ -1,0 +1,5 @@
+*.raw
+*.tgz
+*.png
+fbink
+__pycache__/
