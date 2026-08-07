@@ -66,15 +66,33 @@ ttbox() {
     fi
 }
 
+WEATHER_FILE="/tmp/weather.json"
+
+parse_weather() {
+    _FIELD="$1"; _OCCUR="${2:-1}"
+    grep -o "\"${_FIELD}\":\"[^\"]*\"" "$WEATHER_FILE" | sed -n "${_OCCUR}p" | cut -d'"' -f4
+}
+
 fetch_weather() {
-    WDATA=$(wget -q -T 15 -O - "http://wttr.in/${LOCATION}?format=%t|%C|%f|%h|%w" 2>> "$LOG")
-    if [ -n "$WDATA" ]; then
-        TEMP=$(echo "$WDATA" | cut -d'|' -f1 | tr -d '+')
-        DESC=$(echo "$WDATA" | cut -d'|' -f2)
-        FEELS=$(echo "$WDATA" | cut -d'|' -f3 | tr -d '+')
-        HUMID=$(echo "$WDATA" | cut -d'|' -f4)
-        WIND=$(echo "$WDATA" | cut -d'|' -f5 | tr -cd '0-9a-zA-Z./ ')
-        echo "Weather OK: $TEMP $DESC feels=$FEELS hum=$HUMID wind=$WIND" >> "$LOG"
+    if wget -q -T 15 -O "$WEATHER_FILE" "http://wttr.in/${LOCATION}?format=j1" 2>> "$LOG"; then
+        TEMP=$(parse_weather "temp_C" 1)
+        FEELS=$(parse_weather "FeelsLikeC" 1)
+        HUMID=$(parse_weather "humidity" 1)
+        WINDSP=$(parse_weather "windspeedKmph" 1)
+        WINDDIR=$(parse_weather "winddir16Point" 1)
+        DESC=$(grep -o '"weatherDesc":.{"value":"[^"]*"' "$WEATHER_FILE" | head -1 | sed 's/.*"value":"//;s/"//')
+        MAXT1=$(parse_weather "maxtempC" 1)
+        MINT1=$(parse_weather "mintempC" 1)
+        MAXT2=$(parse_weather "maxtempC" 2)
+        MINT2=$(parse_weather "mintempC" 2)
+        MAXT3=$(parse_weather "maxtempC" 3)
+        MINT3=$(parse_weather "mintempC" 3)
+        _DOW=$(date '+%w')
+        case $(( (_DOW + 2) % 7 )) in
+            0) DAY3="Sun";; 1) DAY3="Mon";; 2) DAY3="Tue";;
+            3) DAY3="Wed";; 4) DAY3="Thu";; 5) DAY3="Fri";; 6) DAY3="Sat";;
+        esac
+        echo "Weather OK: ${TEMP}C ${DESC} H/L:${MAXT1}/${MINT1}" >> "$LOG"
     else
         echo "Weather fetch failed" >> "$LOG"
     fi
@@ -156,13 +174,18 @@ draw_dashboard() {
     ttbox 20 290 560 30 390 "${DAY_NOW}
 ${DATE_NOW}"
 
-    # Weather block
-    ttbox 18 470 160 30 390 "${TEMP}  ${DESC}
-Kingston, ON
+    # Big temperature + description
+    ttbox 24 470 430 30 390 "${TEMP}C  ${DESC}" bold
 
-Feels: ${FEELS}
-Humidity: ${HUMID}
-Wind: ${WIND}"
+    # Weather details + 3-day forecast
+    ttbox 14 600 80 30 390 "Kingston, ON
+
+Feels: ${FEELS}C  Humidity: ${HUMID}%
+Wind: ${WINDSP}km/h ${WINDDIR}
+
+Today     ${MAXT1}/${MINT1}C
+Tmrw      ${MAXT2}/${MINT2}C
+${DAY3}       ${MAXT3}/${MINT3}C"
 
     # === RIGHT COLUMN (x: 400-728) ===
 
@@ -187,7 +210,8 @@ Wind: ${WIND}"
 
 echo "Starting main loop" >> "$LOG"
 
-TEMP="--"; FEELS="--"; HUMID="--"; WIND="--"; DESC="No data"
+TEMP="--"; FEELS="--"; HUMID="--"; WINDSP="--"; WINDDIR=""; DESC="No data"
+MAXT1="--"; MINT1="--"; MAXT2="--"; MINT2="--"; MAXT3="--"; MINT3="--"; DAY3=""
 CAL_OFIR="Loading..."
 CAL_JENNY="Loading..."
 fetch_weather
