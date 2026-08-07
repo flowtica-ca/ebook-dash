@@ -7,12 +7,13 @@ import io
 import os
 
 DISPLAY_SCRIPT = r"""#!/bin/sh
-# ebook-dash: two-panel weather + calendar dashboard
-# Layout: time/date/weather on left, calendar on right
+# ebook-dash: landscape two-panel weather + calendar dashboard
+# Landscape 1024x758 (rotated 90 CCW)
 
 FBINK="/usr/local/ebook-dash/fbink"
-FONT="/usr/local/ebook-dash/NotoSans-Regular.ttf"
-FONTB="/usr/local/ebook-dash/NotoSans-Bold.ttf"
+FONT="/usr/local/ebook-dash/Inter-Regular.ttf"
+FONTB="/usr/local/ebook-dash/Inter-Bold.ttf"
+ROT="-o 3"
 LOCKFILE="/tmp/ebook-dash.lock"
 DISABLE="/mnt/onboard/.kobo/ebook-dash-disable"
 LOG="/mnt/onboard/.kobo/ebookdash.log"
@@ -60,9 +61,9 @@ ensure_wifi
 ttbox() {
     _SZ="$1"; _TP="$2"; _BT="$3"; _LF="$4"; _RT="$5"; _TX="$6"; _ST="${7:-regular}"
     if [ "$_ST" = "bold" ]; then
-        $FBINK -t "bold=$FONTB,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q "$_TX" 2>> "$LOG"
+        $FBINK $ROT -t "bold=$FONTB,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q "$_TX" 2>> "$LOG"
     else
-        $FBINK -t "regular=$FONT,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q "$_TX" 2>> "$LOG"
+        $FBINK $ROT -t "regular=$FONT,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q "$_TX" 2>> "$LOG"
     fi
 }
 
@@ -145,42 +146,44 @@ draw_dashboard() {
     UPDATE_TIME=$(date '+%H:%M')
 
     # Clear framebuffer without refreshing display
-    $FBINK -c -b -q 2>> "$LOG"
+    $FBINK $ROT -c -b -q 2>> "$LOG"
 
-    # === LEFT COLUMN (x: 30-368) ===
+    # === LANDSCAPE 1024x758 ===
+
+    # === LEFT COLUMN (x: 30-420) ===
 
     # Large time
-    ttbox 56 60 740 30 390 "$TIME_NOW" bold
+    ttbox 52 30 538 30 604 "$TIME_NOW" bold
 
     # Day + date
-    ttbox 20 290 560 30 390 "${DAY_NOW}
+    ttbox 18 230 388 30 604 "${DAY_NOW}
 ${DATE_NOW}"
 
     # Weather block
-    ttbox 18 470 160 30 390 "${TEMP}  ${DESC}
+    ttbox 14 380 68 30 604 "${TEMP}  ${DESC}
 Kingston, ON
 
 Feels: ${FEELS}
 Humidity: ${HUMID}
 Wind: ${WIND}"
 
-    # === RIGHT COLUMN (x: 400-728) ===
+    # === RIGHT COLUMN (x: 440-994) ===
 
     # Ofir's calendar
-    ttbox 18 60 880 400 30 "Ofir" bold
+    ttbox 16 30 678 440 30 "Ofir" bold
 
-    ttbox 14 150 560 400 30 "$CAL_OFIR"
+    ttbox 13 90 418 440 30 "$CAL_OFIR"
 
     # Jenny's calendar
-    ttbox 18 480 460 400 30 "Jenny" bold
+    ttbox 16 350 358 440 30 "Jenny" bold
 
-    ttbox 14 570 100 400 30 "$CAL_JENNY"
+    ttbox 13 410 68 440 30 "$CAL_JENNY"
 
     # === FOOTER (full width) ===
-    ttbox 12 960 10 30 30 "Updated: ${UPDATE_TIME}"
+    ttbox 10 725 10 30 30 "Updated: ${UPDATE_TIME}"
 
     # Single screen refresh
-    $FBINK -s -f -W GC16 -q >> "$LOG" 2>&1
+    $FBINK $ROT -s -f -W GC16 -q >> "$LOG" 2>&1
 
     echo "done: $(date)" >> "$LOG"
 }
@@ -218,7 +221,7 @@ def build_koboroot():
     with tarfile.open(tgz_path, "w:gz") as tar:
         add_dir(tar, "usr/local/ebook-dash")
 
-        for name in ["fbink", "NotoSans-Regular.ttf", "NotoSans-Bold.ttf"]:
+        for name in ["fbink", "Inter-Regular.ttf", "Inter-Bold.ttf"]:
             with open(name, "rb") as f:
                 data = f.read()
             mode = 0o755 if name == "fbink" else 0o644
