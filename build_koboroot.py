@@ -56,47 +56,42 @@ ensure_wifi
 ttbox() {
     _SZ="$1"; _TP="$2"; _BT="$3"; _LF="$4"; _RT="$5"; _TX="$6"; _ST="${7:-regular}"
     if [ "$_ST" = "bold" ]; then
-        $FBINK -t "bold=$FONTB,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q "$_TX" 2>> "$LOG"
+        $FBINK -t "bold=$FONTB,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q -- "$_TX" 2>> "$LOG"
     else
-        $FBINK -t "regular=$FONT,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q "$_TX" 2>> "$LOG"
+        $FBINK -t "regular=$FONT,size=$_SZ,top=$_TP,left=$_LF,bottom=$_BT,right=$_RT" -b -q -- "$_TX" 2>> "$LOG"
     fi
+}
+
+WEATHER_FILE="/tmp/weather.json"
+
+parse_weather() {
+    _FIELD="$1"; _OCCUR="${2:-1}"
+    grep -o "\"${_FIELD}\": *\"[^\"]*\"" "$WEATHER_FILE" | sed -n "${_OCCUR}p" | sed 's/.*: *"//;s/"//'
+}
+
+check_online() {
+    wget -q -T 5 -O /dev/null "http://wttr.in/?format=1" 2>/dev/null
 }
 
 fetch_weather() {
-    WDATA=$(wget -q -T 15 -O - "http://wttr.in/${LOCATION}?format=%t|%C|%f|%h|%w" 2>> "$LOG")
-    if [ -n "$WDATA" ]; then
-        TEMP=$(echo "$WDATA" | cut -d'|' -f1 | tr -d '+')
-        DESC=$(echo "$WDATA" | cut -d'|' -f2)
-        FEELS=$(echo "$WDATA" | cut -d'|' -f3 | tr -d '+')
-        HUMID=$(echo "$WDATA" | cut -d'|' -f4)
-        WIND=$(echo "$WDATA" | cut -d'|' -f5 | tr -cd '0-9a-zA-Z./ ')
-        echo "Weather OK: $TEMP $DESC feels=$FEELS hum=$HUMID wind=$WIND" >> "$LOG"
-    else
-        echo "Weather fetch failed" >> "$LOG"
-    fi
-}
-
-FORECAST_FILE="/tmp/forecast.json"
-
-parse_forecast() {
-    _FIELD="$1"; _OCCUR="${2:-1}"
-    grep -o "\"${_FIELD}\": *\"[^\"]*\"" "$FORECAST_FILE" | sed -n "${_OCCUR}p" | sed 's/.*: *"//;s/"//'
-}
-
-fetch_forecast() {
-    if wget -q -T 15 -O "$FORECAST_FILE" "http://wttr.in/${LOCATION}?format=j1" 2>> "$LOG"; then
-        MAXT1=$(parse_forecast "maxtempC" 1)
-        MINT1=$(parse_forecast "mintempC" 1)
-        MAXT2=$(parse_forecast "maxtempC" 2)
-        MINT2=$(parse_forecast "mintempC" 2)
+    if wget -q -T 10 -O "$WEATHER_FILE" "http://wttr.in/${LOCATION}?format=j1" 2>> "$LOG"; then
+        TEMP=$(parse_weather "temp_C" 1)
+        FEELS=$(parse_weather "FeelsLikeC" 1)
+        HUMID=$(parse_weather "humidity" 1)
+        WINDSP=$(parse_weather "windspeedKmph" 1)
+        DESC=$(grep -A 3 '"weatherDesc"' "$WEATHER_FILE" | grep '"value"' | head -1 | sed 's/.*"value": *"//;s/".*//')
+        MAXT1=$(parse_weather "maxtempC" 1)
+        MINT1=$(parse_weather "mintempC" 1)
+        MAXT2=$(parse_weather "maxtempC" 2)
+        MINT2=$(parse_weather "mintempC" 2)
         _DOW=$(date '+%w')
         case $(( (_DOW + 2) % 7 )) in
             0) DAY2="Sun";; 1) DAY2="Mon";; 2) DAY2="Tue";;
             3) DAY2="Wed";; 4) DAY2="Thu";; 5) DAY2="Fri";; 6) DAY2="Sat";;
         esac
-        echo "Forecast: today=${MAXT1}/${MINT1} tmrw=${MAXT2}/${MINT2}" >> "$LOG"
+        echo "Weather: ${TEMP}C ${DESC} feels=${FEELS} hum=${HUMID} wind=${WINDSP}" >> "$LOG"
     else
-        echo "Forecast fetch failed" >> "$LOG"
+        echo "Weather fetch failed" >> "$LOG"
     fi
 }
 
@@ -112,7 +107,7 @@ fetch_https() {
         _TRIES=0
         while [ $_TRIES -lt 5 ]; do
             _RESP=$(printf "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" "$_PATH" "$_HOST" | \
-                timeout 15 openssl s_client -connect "${_HOST}:443" -quiet 2>/dev/null)
+                timeout 10 openssl s_client -connect "${_HOST}:443" -quiet 2>/dev/null)
             [ -z "$_RESP" ] && return
             _LOC=$(echo "$_RESP" | grep -i "^Location:" | sed 's/^[Ll]ocation: *//;s/\r//')
             if [ -n "$_LOC" ]; then
@@ -125,7 +120,7 @@ fetch_https() {
             fi
         done
     fi
-    wget -q -T 15 -O - "$_URL" 2>> "$LOG"
+    wget -q -T 10 -O - "$_URL" 2>> "$LOG"
 }
 
 parse_cal() {
@@ -153,6 +148,7 @@ fetch_calendars() {
 }
 
 draw_dashboard() {
+    echo "ebook-dash" > /sys/power/wake_lock 2>/dev/null
     echo "draw: $(date)" >> "$LOG"
 
     TIME_NOW=$(date '+%H:%M')
@@ -162,35 +158,32 @@ draw_dashboard() {
 
     $FBINK -c -b -q 2>> "$LOG"
 
-    # === LEFT COLUMN (x: 30-368) ===
+    # === LEFT COLUMN ===
 
-    ttbox 56 60 740 30 390 "$TIME_NOW" bold
+    ttbox 60 30 700 30 390 "${TEMP}°C" bold
 
-    ttbox 20 290 560 30 390 "${DAY_NOW}
-${DATE_NOW}"
+    ttbox 18 230 600 30 390 "${DESC}"
 
-    ttbox 18 470 200 30 390 "${TEMP}  ${DESC}
-Kingston, ON
+    ttbox 16 310 550 30 390 "${DAY_NOW}, ${DATE_NOW}"
 
-Feels: ${FEELS}
-Humidity: ${HUMID}
-Wind: ${WIND}"
+    ttbox 11 400 460 30 390 "Feels ${FEELS}°  Humidity ${HUMID}%
+Wind ${WINDSP}km/h  Kingston, ON"
 
-    ttbox 14 770 160 30 390 "Tmrw  ${MAXT1}/${MINT1}C
-${DAY2}   ${MAXT2}/${MINT2}C"
+    ttbox 14 500 410 30 390 "Tmrw  ${MAXT1}/${MINT1}°
+${DAY2}   ${MAXT2}/${MINT2}°"
 
-    # === RIGHT COLUMN (x: 400-728) ===
+    # === RIGHT COLUMN ===
 
-    ttbox 18 60 880 400 30 "Ofir" bold
+    ttbox 18 30 880 400 30 "Ofir" bold
 
-    ttbox 14 150 560 400 30 "$CAL_OFIR"
+    ttbox 14 120 560 400 30 "$CAL_OFIR"
 
     ttbox 18 480 460 400 30 "Jenny" bold
 
     ttbox 14 570 100 400 30 "$CAL_JENNY"
 
-    # === FOOTER (full width) ===
-    ttbox 12 960 10 30 30 "Updated: ${UPDATE_TIME}"
+    # === FOOTER ===
+    ttbox 12 960 10 30 30 "Updated: ${UPDATE_TIME}  |  ebook-dash"
 
     $FBINK -s -f -W GC16 -q >> "$LOG" 2>&1
 
@@ -199,13 +192,16 @@ ${DAY2}   ${MAXT2}/${MINT2}C"
 
 echo "Starting main loop" >> "$LOG"
 
-TEMP="--"; FEELS="--"; HUMID="--"; WIND="--"; DESC="No data"
+TEMP="--"; FEELS="--"; HUMID="--"; WINDSP="--"; DESC="No data"
 MAXT1="--"; MINT1="--"; MAXT2="--"; MINT2="--"; DAY2=""
 CAL_OFIR="Loading..."
 CAL_JENNY="Loading..."
-fetch_weather
-fetch_forecast
-fetch_calendars
+if check_online; then
+    fetch_weather
+    fetch_calendars
+else
+    echo "No internet at startup" >> "$LOG"
+fi
 draw_dashboard
 
 CYCLE=0
@@ -215,9 +211,12 @@ while true; do
     CYCLE=$((CYCLE + 1))
     if [ $((CYCLE % 5)) -eq 0 ]; then
         ensure_wifi
-        fetch_weather
-        fetch_forecast
-        fetch_calendars
+        if check_online; then
+            fetch_weather
+            fetch_calendars
+        else
+            echo "Offline, skipping fetch" >> "$LOG"
+        fi
     fi
     draw_dashboard
 done
