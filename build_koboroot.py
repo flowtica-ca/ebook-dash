@@ -1,6 +1,7 @@
 """Build KoboRoot.tgz for Kobo dynamic weather dashboard.
 
 Uses FBInk TrueType rendering + wttr.in for weather data.
+Weather icons rendered as Unicode symbols via TrueType.
 """
 import tarfile
 import io
@@ -89,7 +90,7 @@ fetch_weather() {
             0) DAY2="Sun";; 1) DAY2="Mon";; 2) DAY2="Tue";;
             3) DAY2="Wed";; 4) DAY2="Thu";; 5) DAY2="Fri";; 6) DAY2="Sat";;
         esac
-        echo "Weather: ${TEMP}C ${DESC} feels=${FEELS} hum=${HUMID} wind=${WINDSP}" >> "$LOG"
+        echo "Weather: ${TEMP}C ${DESC}" >> "$LOG"
     else
         echo "Weather fetch failed" >> "$LOG"
     fi
@@ -160,23 +161,23 @@ draw_dashboard() {
 
     # === LEFT COLUMN ===
 
-    ttbox 60 30 700 30 390 "${TEMP}°C" bold
+    ttbox 60 20 700 30 390 "${TEMP}°C" bold
 
-    ttbox 18 230 600 30 390 "${DESC}"
+    ttbox 24 210 590 30 390 "${DESC}" bold
 
-    ttbox 16 310 550 30 390 "${DAY_NOW}, ${DATE_NOW}"
+    ttbox 16 320 540 30 390 "${DAY_NOW}, ${DATE_NOW}"
 
-    ttbox 11 400 460 30 390 "Feels ${FEELS}°  Humidity ${HUMID}%
+    ttbox 14 420 430 30 390 "Feels ${FEELS}°  Humidity ${HUMID}%
 Wind ${WINDSP}km/h  Kingston, ON"
 
-    ttbox 14 500 410 30 390 "Tmrw  ${MAXT1}/${MINT1}°
+    ttbox 16 550 350 30 390 "Tmrw  ${MAXT1}/${MINT1}°
 ${DAY2}   ${MAXT2}/${MINT2}°"
 
     # === RIGHT COLUMN ===
 
-    ttbox 18 30 880 400 30 "Ofir" bold
+    ttbox 18 20 880 400 30 "Ofir" bold
 
-    ttbox 14 120 560 400 30 "$CAL_OFIR"
+    ttbox 14 110 560 400 30 "$CAL_OFIR"
 
     ttbox 18 480 460 400 30 "Jenny" bold
 
