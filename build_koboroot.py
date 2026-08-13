@@ -162,14 +162,15 @@ draw_dashboard() {
 
     ttbox 60 30 700 30 390 "${TEMP}°C" bold
 
-    ttbox 18 230 600 30 390 "${DESC}"
+    ttbox 24 280 500 30 390 "${DESC}" bold
 
-    ttbox 16 310 550 30 390 "${DAY_NOW}, ${DATE_NOW}"
+    ttbox 16 400 450 30 390 "${DAY_NOW}, ${DATE_NOW}"
 
-    ttbox 11 400 460 30 390 "Feels ${FEELS}°  Humidity ${HUMID}%
+    ttbox 16 530 270 30 390 "Feels ${FEELS}°
+Humidity ${HUMID}%
 Wind ${WINDSP}km/h  Kingston, ON"
 
-    ttbox 14 500 410 30 390 "Tmrw  ${MAXT1}/${MINT1}°
+    ttbox 16 780 100 30 390 "Tmrw  ${MAXT1}/${MINT1}°
 ${DAY2}   ${MAXT2}/${MINT2}°"
 
     # === RIGHT COLUMN ===
