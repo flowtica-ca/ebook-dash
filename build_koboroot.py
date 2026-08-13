@@ -74,9 +74,9 @@ check_online() {
 }
 
 # NotoSans has no weather glyphs, so conditions become plain words.
-# A slot is 100px wide and the condition renders at size 10, so these must
-# stay at 5 characters or fewer — the widest, "Sunny", measures 88px, and
-# anything wider wraps to a second line that the row box then drops.
+# A slot is 100px wide and the condition renders at size 11, so these stay
+# at 5 characters or fewer — the widest, "Sunny", measures 64px, which
+# leaves a clean gutter between slots. Anything that wraps gets dropped.
 short_cond() {
     case "$1" in
         "")           echo "--";;
@@ -228,32 +228,38 @@ draw_dashboard() {
 
     ttbox 60 30 700 30 390 "${TEMP}°C" bold
 
-    ttbox 24 280 645 30 390 "${DESC}" bold
+    # Two-line capacity: 16 of wttr.in's 27 conditions fit one line here,
+    # 8 more need two. The 3 longest still truncate, as they did on main.
+    ttbox 24 240 610 30 390 "${DESC}" bold
 
-    ttbox 16 380 529 30 390 "${DAY_NOW}, ${DATE_NOW}"
+    ttbox 16 414 490 30 390 "${DAY_NOW}, ${DATE_NOW}"
 
-    ttbox 16 496 360 30 390 "Feels ${FEELS}°
-Humidity ${HUMID}%
-Wind ${WINDSP}km/h  Kingston, ON"
+    # FBInk needs 3.375*size*lines + 6 px of box or it drops the lines that
+    # do not fit (fitted to 14 on-device observations). At size 16 that is
+    # 54px a line, so this block is merged to two lines and "Kingston, ON"
+    # moved to the footer -- the four lines it used to take are 108px that
+    # the hourly bar now occupies.
+    ttbox 16 534 370 30 390 "Feels ${FEELS}°  Hum ${HUMID}%
+Wind ${WINDSP}km/h"
 
-    ttbox 16 665 247 30 390 "Tmrw  ${MAXT1}/${MINT1}°
+    ttbox 16 654 250 30 390 "Tmrw  ${MAXT1}/${MINT1}°
 ${DAY2}   ${MAXT2}/${MINT2}°"
 
     # === RIGHT COLUMN ===
-    # Ofir 30..399, Jenny 402..771 — equal 369px blocks
+    # Ofir 30..398, Jenny 404..772 — equal 368px blocks
 
-    ttbox 18 30 924 400 30 "Ofir" bold
+    ttbox 18 30 922 400 30 "Ofir" bold
 
-    ttbox 14 105 625 400 30 "$CAL_OFIR"
+    ttbox 14 102 626 400 30 "$CAL_OFIR"
 
-    ttbox 18 402 552 400 30 "Jenny" bold
+    ttbox 18 404 548 400 30 "Jenny" bold
 
-    ttbox 14 477 253 400 30 "$CAL_JENNY"
+    ttbox 14 476 252 400 30 "$CAL_JENNY"
 
     # === HOURLY BAR (full width, 7 slots of 100px from x=30) ===
-    # FBInk scales points at the panel's 212 DPI, so a line occupies about
-    # 3.3x the size in pixels and any line that does not fully fit its box
-    # is dropped. Each row box below is sized at 3.5x for headroom.
+    # Each row is one line, boxed at 3.375*size + 12 for headroom. Slot text
+    # is measured, not estimated: "18h" is 43px, "-25°" 59px and "Sunny"
+    # 64px against a 100px slot, so nothing wraps into a dropped line.
 
     _I=0
     while [ $_I -lt 7 ]; do
@@ -262,14 +268,14 @@ ${DAY2}   ${MAXT2}/${MINT2}°"
         eval "_T=\$H${_I}T"
         eval "_P=\$H${_I}P"
         eval "_C=\$H${_I}C"
-        ttbox 12 790 190 "$_L" "$_R" "$_T"
-        ttbox 16 840 126 "$_L" "$_R" "${_P}°" bold
-        ttbox 10 903 80 "$_L" "$_R" "$_C"
+        ttbox 12 774 196 "$_L" "$_R" "$_T"
+        ttbox 16 828 130 "$_L" "$_R" "${_P}°" bold
+        ttbox 11 894 80 "$_L" "$_R" "$_C"
         _I=$((_I + 1))
     done
 
     # === FOOTER ===
-    ttbox 12 960 10 30 30 "Updated: ${UPDATE_TIME}  |  ebook-dash"
+    ttbox 12 960 10 30 30 "Kingston, ON  |  Updated: ${UPDATE_TIME}  |  ebook-dash"
 
     $FBINK -s -f -W GC16 -q >> "$LOG" 2>&1
 
