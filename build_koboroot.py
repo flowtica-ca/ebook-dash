@@ -73,6 +73,69 @@ check_online() {
     wget -q -T 5 -O /dev/null "http://wttr.in/?format=1" 2>/dev/null
 }
 
+# NotoSans has no weather glyphs, so conditions are shortened to plain words
+# that fit a ~100px slot at size 12 (roughly 15 characters).
+short_cond() {
+    case "$1" in
+        "")           echo "--";;
+        *hunder*)     echo "Storm";;
+        *lizzard*)    echo "Snow";;
+        *Blowing*)    echo "Snow";;
+        *leet*)       echo "Sleet";;
+        *pellets*)    echo "Hail";;
+        *now*)        echo "Snow";;
+        *rizzle*)     echo "Drizzle";;
+        *ain*)        echo "Rain";;
+        *hower*)      echo "Rain";;
+        *vercast*)    echo "Overcast";;
+        *loudy*)      echo "Cloudy";;
+        *og*)         echo "Fog";;
+        *ist*)        echo "Mist";;
+        Sunny*)       echo "Sunny";;
+        Clear*)       echo "Clear";;
+        *)            echo "$1" | cut -d' ' -f1 | cut -c1-8;;
+    esac
+}
+
+# wttr.in j1 gives 8 hourly entries per day (0,3,6,...,21) across 3 days.
+# Flattened, entry N is the Nth occurrence of "time"/"tempC" in the file.
+# "weatherDesc" is offset by one because current_condition carries one too.
+fetch_hourly() {
+    _NOWH=$(date '+%H')
+    _NOWH=${_NOWH#0}
+    [ -z "$_NOWH" ] && _NOWH=0
+    _BASE=$((_NOWH / 3))
+    _I=0
+    while [ $_I -lt 7 ]; do
+        _N=$((_BASE + _I + 1))
+        _RAWT=$(grep -o '"time": *"[0-9]*"' "$WEATHER_FILE" | sed -n "${_N}p" | sed 's/.*: *"//;s/"//')
+        _RAWP=$(grep -o '"tempC": *"[-0-9]*"' "$WEATHER_FILE" | sed -n "${_N}p" | sed 's/.*: *"//;s/"//')
+        _RAWD=$(grep -A 3 '"weatherDesc"' "$WEATHER_FILE" | grep '"value"' | sed -n "$((_N + 1))p" | sed 's/.*"value": *"//;s/".*//')
+        if [ -n "$_RAWT" ]; then
+            _LBL=$(printf '%02dh' $((_RAWT / 100)))
+        else
+            _LBL="--"
+        fi
+        [ -z "$_RAWP" ] && _RAWP="--"
+        _SC=$(short_cond "$_RAWD")
+        eval "H${_I}T=\"\$_LBL\""
+        eval "H${_I}P=\"\$_RAWP\""
+        eval "H${_I}C=\"\$_SC\""
+        _I=$((_I + 1))
+    done
+    echo "Hourly: base=$_BASE ${H0T}/${H0P} ${H1T}/${H1P} ${H2T}/${H2P} ${H3T}/${H3P} ${H4T}/${H4P} ${H5T}/${H5P} ${H6T}/${H6P}" >> "$LOG"
+}
+
+reset_hourly() {
+    _I=0
+    while [ $_I -lt 7 ]; do
+        eval "H${_I}T=\"--\""
+        eval "H${_I}P=\"--\""
+        eval "H${_I}C=\"\""
+        _I=$((_I + 1))
+    done
+}
+
 fetch_weather() {
     if wget -q -T 10 -O "$WEATHER_FILE" "http://wttr.in/${LOCATION}?format=j1" 2>> "$LOG"; then
         TEMP=$(parse_weather "temp_C" 1)
@@ -89,6 +152,7 @@ fetch_weather() {
             0) DAY2="Sun";; 1) DAY2="Mon";; 2) DAY2="Tue";;
             3) DAY2="Wed";; 4) DAY2="Thu";; 5) DAY2="Fri";; 6) DAY2="Sat";;
         esac
+        fetch_hourly
         echo "Weather: ${TEMP}C ${DESC} feels=${FEELS} hum=${HUMID} wind=${WINDSP}" >> "$LOG"
     else
         echo "Weather fetch failed" >> "$LOG"
@@ -166,22 +230,42 @@ draw_dashboard() {
 
     ttbox 16 400 450 30 390 "${DAY_NOW}, ${DATE_NOW}"
 
-    ttbox 16 530 270 30 390 "Feels ${FEELS}°
+    ttbox 16 530 380 30 390 "Feels ${FEELS}°
 Humidity ${HUMID}%
 Wind ${WINDSP}km/h  Kingston, ON"
 
-    ttbox 16 780 100 30 390 "Tmrw  ${MAXT1}/${MINT1}°
+    ttbox 16 660 264 30 390 "Tmrw  ${MAXT1}/${MINT1}°
 ${DAY2}   ${MAXT2}/${MINT2}°"
 
     # === RIGHT COLUMN ===
+    # Ofir 30..390, Jenny 408..768 — equal 360px blocks
 
-    ttbox 18 30 880 400 30 "Ofir" bold
+    ttbox 18 30 936 400 30 "Ofir" bold
 
-    ttbox 14 120 560 400 30 "$CAL_OFIR"
+    ttbox 14 98 634 400 30 "$CAL_OFIR"
 
-    ttbox 18 480 460 400 30 "Jenny" bold
+    ttbox 18 408 558 400 30 "Jenny" bold
 
-    ttbox 14 570 100 400 30 "$CAL_JENNY"
+    ttbox 14 476 256 400 30 "$CAL_JENNY"
+
+    # === HOURLY BAR (full width, 7 slots of 100px from x=30) ===
+    # Rows are sized for one line each with headroom; conditions are kept
+    # to <=8 chars by short_cond so a slot never wraps to a clipped line.
+
+    ttbox 12 780 212 30 30 "NEXT HOURS"
+
+    _I=0
+    while [ $_I -lt 7 ]; do
+        _L=$((30 + _I * 100))
+        _R=$((628 - _I * 100))
+        eval "_T=\$H${_I}T"
+        eval "_P=\$H${_I}P"
+        eval "_C=\$H${_I}C"
+        ttbox 13 814 176 "$_L" "$_R" "$_T"
+        ttbox 18 850 128 "$_L" "$_R" "${_P}°" bold
+        ttbox 12 898 90 "$_L" "$_R" "$_C"
+        _I=$((_I + 1))
+    done
 
     # === FOOTER ===
     ttbox 12 960 10 30 30 "Updated: ${UPDATE_TIME}  |  ebook-dash"
@@ -197,6 +281,7 @@ TEMP="--"; FEELS="--"; HUMID="--"; WINDSP="--"; DESC="No data"
 MAXT1="--"; MINT1="--"; MAXT2="--"; MINT2="--"; DAY2=""
 CAL_OFIR="Loading..."
 CAL_JENNY="Loading..."
+reset_hourly
 if check_online; then
     fetch_weather
     fetch_calendars
