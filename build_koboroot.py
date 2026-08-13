@@ -73,8 +73,10 @@ check_online() {
     wget -q -T 5 -O /dev/null "http://wttr.in/?format=1" 2>/dev/null
 }
 
-# NotoSans has no weather glyphs, so conditions are shortened to plain words
-# that fit a ~100px slot at size 12 (roughly 15 characters).
+# NotoSans has no weather glyphs, so conditions become plain words.
+# A slot is 100px wide and the condition renders at size 10, so these must
+# stay at 5 characters or fewer — the widest, "Sunny", measures 88px, and
+# anything wider wraps to a second line that the row box then drops.
 short_cond() {
     case "$1" in
         "")           echo "--";;
@@ -84,16 +86,16 @@ short_cond() {
         *leet*)       echo "Sleet";;
         *pellets*)    echo "Hail";;
         *now*)        echo "Snow";;
-        *rizzle*)     echo "Drizzle";;
+        *rizzle*)     echo "Drizl";;
         *ain*)        echo "Rain";;
         *hower*)      echo "Rain";;
-        *vercast*)    echo "Overcast";;
-        *loudy*)      echo "Cloudy";;
+        *vercast*)    echo "Ovcst";;
+        *loudy*)      echo "Cloud";;
         *og*)         echo "Fog";;
         *ist*)        echo "Mist";;
         Sunny*)       echo "Sunny";;
         Clear*)       echo "Clear";;
-        *)            echo "$1" | cut -d' ' -f1 | cut -c1-8;;
+        *)            echo "$1" | cut -d' ' -f1 | cut -c1-5;;
     esac
 }
 
@@ -226,33 +228,32 @@ draw_dashboard() {
 
     ttbox 60 30 700 30 390 "${TEMP}°C" bold
 
-    ttbox 24 280 500 30 390 "${DESC}" bold
+    ttbox 24 280 645 30 390 "${DESC}" bold
 
-    ttbox 16 400 450 30 390 "${DAY_NOW}, ${DATE_NOW}"
+    ttbox 16 380 529 30 390 "${DAY_NOW}, ${DATE_NOW}"
 
-    ttbox 16 530 380 30 390 "Feels ${FEELS}°
+    ttbox 16 496 360 30 390 "Feels ${FEELS}°
 Humidity ${HUMID}%
 Wind ${WINDSP}km/h  Kingston, ON"
 
-    ttbox 16 660 264 30 390 "Tmrw  ${MAXT1}/${MINT1}°
+    ttbox 16 665 247 30 390 "Tmrw  ${MAXT1}/${MINT1}°
 ${DAY2}   ${MAXT2}/${MINT2}°"
 
     # === RIGHT COLUMN ===
-    # Ofir 30..390, Jenny 408..768 — equal 360px blocks
+    # Ofir 30..399, Jenny 402..771 — equal 369px blocks
 
-    ttbox 18 30 936 400 30 "Ofir" bold
+    ttbox 18 30 924 400 30 "Ofir" bold
 
-    ttbox 14 98 634 400 30 "$CAL_OFIR"
+    ttbox 14 105 625 400 30 "$CAL_OFIR"
 
-    ttbox 18 408 558 400 30 "Jenny" bold
+    ttbox 18 402 552 400 30 "Jenny" bold
 
-    ttbox 14 476 256 400 30 "$CAL_JENNY"
+    ttbox 14 477 253 400 30 "$CAL_JENNY"
 
     # === HOURLY BAR (full width, 7 slots of 100px from x=30) ===
-    # Rows are sized for one line each with headroom; conditions are kept
-    # to <=8 chars by short_cond so a slot never wraps to a clipped line.
-
-    ttbox 12 780 212 30 30 "NEXT HOURS"
+    # FBInk scales points at the panel's 212 DPI, so a line occupies about
+    # 3.3x the size in pixels and any line that does not fully fit its box
+    # is dropped. Each row box below is sized at 3.5x for headroom.
 
     _I=0
     while [ $_I -lt 7 ]; do
@@ -261,9 +262,9 @@ ${DAY2}   ${MAXT2}/${MINT2}°"
         eval "_T=\$H${_I}T"
         eval "_P=\$H${_I}P"
         eval "_C=\$H${_I}C"
-        ttbox 13 814 176 "$_L" "$_R" "$_T"
-        ttbox 18 850 128 "$_L" "$_R" "${_P}°" bold
-        ttbox 12 898 90 "$_L" "$_R" "$_C"
+        ttbox 12 790 190 "$_L" "$_R" "$_T"
+        ttbox 16 840 126 "$_L" "$_R" "${_P}°" bold
+        ttbox 10 903 80 "$_L" "$_R" "$_C"
         _I=$((_I + 1))
     done
 
