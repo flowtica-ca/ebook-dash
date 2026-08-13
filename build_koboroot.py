@@ -102,17 +102,48 @@ short_cond() {
 # wttr.in j1 gives 8 hourly entries per day (0,3,6,...,21) across 3 days.
 # Flattened, entry N is the Nth occurrence of "time"/"tempC" in the file.
 # "weatherDesc" is offset by one because current_condition carries one too.
+#
+# Called from draw_dashboard, not from fetch_weather: it only reads the
+# local file, so the window keeps tracking the clock while the device is
+# offline. Gating it on a successful fetch left the labels frozen at
+# whatever period the last fetch happened in.
 fetch_hourly() {
+    [ -s "$WEATHER_FILE" ] || { reset_hourly; return; }
+
+    # Pull each column out of the 39KB file once. This runs every draw, so
+    # re-grepping the file per slot would be ~24 passes a minute.
+    _DATES=$(grep -o '"date": *"[0-9-]*"' "$WEATHER_FILE" | sed 's/.*: *"//;s/"//')
+    _TIMES=$(grep -o '"time": *"[0-9]*"' "$WEATHER_FILE" | sed 's/.*: *"//;s/"//')
+    _TEMPS=$(grep -o '"tempC": *"[-0-9]*"' "$WEATHER_FILE" | sed 's/.*: *"//;s/"//')
+    _DESCS=$(grep -A 3 '"weatherDesc"' "$WEATHER_FILE" | grep '"value"' | sed 's/.*"value": *"//;s/".*//')
+
+    # After a long outage the file's day 1 is no longer today, and entry N
+    # would point at the wrong day. Find which of its 3 days is today and
+    # skip 8 entries per day; if none matches, the file is too old to use.
+    _TODAY=$(date '+%Y-%m-%d')
+    _DAYIDX=0
+    _D=1
+    while [ $_D -le 3 ]; do
+        [ "$(echo "$_DATES" | sed -n "${_D}p")" = "$_TODAY" ] && { _DAYIDX=$_D; break; }
+        _D=$((_D + 1))
+    done
+    if [ $_DAYIDX -eq 0 ]; then
+        [ "$_LASTBASE" != "stale" ] && echo "Hourly: file has no entry for $_TODAY, blanking" >> "$LOG"
+        _LASTBASE="stale"
+        reset_hourly
+        return
+    fi
+
     _NOWH=$(date '+%H')
     _NOWH=${_NOWH#0}
     [ -z "$_NOWH" ] && _NOWH=0
-    _BASE=$((_NOWH / 3))
+    _BASE=$(( (_DAYIDX - 1) * 8 + _NOWH / 3 ))
     _I=0
     while [ $_I -lt 7 ]; do
         _N=$((_BASE + _I + 1))
-        _RAWT=$(grep -o '"time": *"[0-9]*"' "$WEATHER_FILE" | sed -n "${_N}p" | sed 's/.*: *"//;s/"//')
-        _RAWP=$(grep -o '"tempC": *"[-0-9]*"' "$WEATHER_FILE" | sed -n "${_N}p" | sed 's/.*: *"//;s/"//')
-        _RAWD=$(grep -A 3 '"weatherDesc"' "$WEATHER_FILE" | grep '"value"' | sed -n "$((_N + 1))p" | sed 's/.*"value": *"//;s/".*//')
+        _RAWT=$(echo "$_TIMES" | sed -n "${_N}p")
+        _RAWP=$(echo "$_TEMPS" | sed -n "${_N}p")
+        _RAWD=$(echo "$_DESCS" | sed -n "$((_N + 1))p")
         if [ -n "$_RAWT" ]; then
             _LBL=$(printf '%02dh' $((_RAWT / 100)))
         else
@@ -125,7 +156,11 @@ fetch_hourly() {
         eval "H${_I}C=\"\$_SC\""
         _I=$((_I + 1))
     done
-    echo "Hourly: base=$_BASE ${H0T}/${H0P} ${H1T}/${H1P} ${H2T}/${H2P} ${H3T}/${H3P} ${H4T}/${H4P} ${H5T}/${H5P} ${H6T}/${H6P}" >> "$LOG"
+    # Runs every draw now, so only log when the window actually shifts.
+    if [ "$_LASTBASE" != "$_BASE" ]; then
+        echo "Hourly: base=$_BASE ${H0T}/${H0P} ${H1T}/${H1P} ${H2T}/${H2P} ${H3T}/${H3P} ${H4T}/${H4P} ${H5T}/${H5P} ${H6T}/${H6P}" >> "$LOG"
+        _LASTBASE="$_BASE"
+    fi
 }
 
 reset_hourly() {
@@ -154,7 +189,7 @@ fetch_weather() {
             0) DAY2="Sun";; 1) DAY2="Mon";; 2) DAY2="Tue";;
             3) DAY2="Wed";; 4) DAY2="Thu";; 5) DAY2="Fri";; 6) DAY2="Sat";;
         esac
-        fetch_hourly
+        LAST_FETCH=$(date '+%H:%M')
         echo "Weather: ${TEMP}C ${DESC} feels=${FEELS} hum=${HUMID} wind=${WINDSP}" >> "$LOG"
     else
         echo "Weather fetch failed" >> "$LOG"
@@ -220,7 +255,10 @@ draw_dashboard() {
     TIME_NOW=$(date '+%H:%M')
     DAY_NOW=$(date '+%A')
     DATE_NOW=$(date '+%B %d, %Y')
-    UPDATE_TIME=$(date '+%H:%M')
+
+    # Re-derive the hourly window from the clock on every draw, so it stays
+    # correct even when the network is down and no fetch has succeeded.
+    fetch_hourly
 
     $FBINK -c -b -q 2>> "$LOG"
 
@@ -275,7 +313,10 @@ ${DAY2}   ${MAXT2}/${MINT2}°"
     done
 
     # === FOOTER ===
-    ttbox 12 960 10 30 30 "Kingston, ON  |  Updated: ${UPDATE_TIME}  |  ebook-dash"
+    # Two clocks on purpose: "Now" proves the script is alive, "Data" is the
+    # last successful fetch. When they diverge the weather is stale, which
+    # a single redraw-driven timestamp hid completely.
+    ttbox 12 960 10 30 30 "Kingston, ON  |  Now ${TIME_NOW}  |  Data ${LAST_FETCH}  |  ebook-dash"
 
     $FBINK -s -f -W GC16 -q >> "$LOG" 2>&1
 
@@ -288,6 +329,8 @@ TEMP="--"; FEELS="--"; HUMID="--"; WINDSP="--"; DESC="No data"
 MAXT1="--"; MINT1="--"; MAXT2="--"; MINT2="--"; DAY2=""
 CAL_OFIR="Loading..."
 CAL_JENNY="Loading..."
+LAST_FETCH="--:--"
+_LASTBASE=""
 reset_hourly
 if check_online; then
     fetch_weather
