@@ -73,6 +73,71 @@ check_online() {
     wget -q -T 5 -O /dev/null "http://wttr.in/?format=1" 2>/dev/null
 }
 
+# NotoSans has no weather glyphs, so conditions become plain words.
+# A slot is 100px wide and the condition renders at size 11, so these stay
+# at 5 characters or fewer — the widest, "Sunny", measures 64px, which
+# leaves a clean gutter between slots. Anything that wraps gets dropped.
+short_cond() {
+    case "$1" in
+        "")           echo "--";;
+        *hunder*)     echo "Storm";;
+        *lizzard*)    echo "Snow";;
+        *Blowing*)    echo "Snow";;
+        *leet*)       echo "Sleet";;
+        *pellets*)    echo "Hail";;
+        *now*)        echo "Snow";;
+        *rizzle*)     echo "Drizl";;
+        *ain*)        echo "Rain";;
+        *hower*)      echo "Rain";;
+        *vercast*)    echo "Ovcst";;
+        *loudy*)      echo "Cloud";;
+        *og*)         echo "Fog";;
+        *ist*)        echo "Mist";;
+        Sunny*)       echo "Sunny";;
+        Clear*)       echo "Clear";;
+        *)            echo "$1" | cut -d' ' -f1 | cut -c1-5;;
+    esac
+}
+
+# wttr.in j1 gives 8 hourly entries per day (0,3,6,...,21) across 3 days.
+# Flattened, entry N is the Nth occurrence of "time"/"tempC" in the file.
+# "weatherDesc" is offset by one because current_condition carries one too.
+fetch_hourly() {
+    _NOWH=$(date '+%H')
+    _NOWH=${_NOWH#0}
+    [ -z "$_NOWH" ] && _NOWH=0
+    _BASE=$((_NOWH / 3))
+    _I=0
+    while [ $_I -lt 7 ]; do
+        _N=$((_BASE + _I + 1))
+        _RAWT=$(grep -o '"time": *"[0-9]*"' "$WEATHER_FILE" | sed -n "${_N}p" | sed 's/.*: *"//;s/"//')
+        _RAWP=$(grep -o '"tempC": *"[-0-9]*"' "$WEATHER_FILE" | sed -n "${_N}p" | sed 's/.*: *"//;s/"//')
+        _RAWD=$(grep -A 3 '"weatherDesc"' "$WEATHER_FILE" | grep '"value"' | sed -n "$((_N + 1))p" | sed 's/.*"value": *"//;s/".*//')
+        if [ -n "$_RAWT" ]; then
+            _LBL=$(printf '%02dh' $((_RAWT / 100)))
+        else
+            _LBL="--"
+        fi
+        [ -z "$_RAWP" ] && _RAWP="--"
+        _SC=$(short_cond "$_RAWD")
+        eval "H${_I}T=\"\$_LBL\""
+        eval "H${_I}P=\"\$_RAWP\""
+        eval "H${_I}C=\"\$_SC\""
+        _I=$((_I + 1))
+    done
+    echo "Hourly: base=$_BASE ${H0T}/${H0P} ${H1T}/${H1P} ${H2T}/${H2P} ${H3T}/${H3P} ${H4T}/${H4P} ${H5T}/${H5P} ${H6T}/${H6P}" >> "$LOG"
+}
+
+reset_hourly() {
+    _I=0
+    while [ $_I -lt 7 ]; do
+        eval "H${_I}T=\"--\""
+        eval "H${_I}P=\"--\""
+        eval "H${_I}C=\"\""
+        _I=$((_I + 1))
+    done
+}
+
 fetch_weather() {
     if wget -q -T 10 -O "$WEATHER_FILE" "http://wttr.in/${LOCATION}?format=j1" 2>> "$LOG"; then
         TEMP=$(parse_weather "temp_C" 1)
@@ -89,6 +154,7 @@ fetch_weather() {
             0) DAY2="Sun";; 1) DAY2="Mon";; 2) DAY2="Tue";;
             3) DAY2="Wed";; 4) DAY2="Thu";; 5) DAY2="Fri";; 6) DAY2="Sat";;
         esac
+        fetch_hourly
         echo "Weather: ${TEMP}C ${DESC} feels=${FEELS} hum=${HUMID} wind=${WINDSP}" >> "$LOG"
     else
         echo "Weather fetch failed" >> "$LOG"
@@ -162,29 +228,54 @@ draw_dashboard() {
 
     ttbox 60 30 700 30 390 "${TEMP}°C" bold
 
-    ttbox 24 280 500 30 390 "${DESC}" bold
+    # Two-line capacity: 16 of wttr.in's 27 conditions fit one line here,
+    # 8 more need two. The 3 longest still truncate, as they did on main.
+    ttbox 24 240 610 30 390 "${DESC}" bold
 
-    ttbox 16 400 450 30 390 "${DAY_NOW}, ${DATE_NOW}"
+    ttbox 16 414 490 30 390 "${DAY_NOW}, ${DATE_NOW}"
 
-    ttbox 16 530 270 30 390 "Feels ${FEELS}°
-Humidity ${HUMID}%
-Wind ${WINDSP}km/h  Kingston, ON"
+    # FBInk needs 3.375*size*lines + 6 px of box or it drops the lines that
+    # do not fit (fitted to 14 on-device observations). At size 16 that is
+    # 54px a line, so this block is merged to two lines and "Kingston, ON"
+    # moved to the footer -- the four lines it used to take are 108px that
+    # the hourly bar now occupies.
+    ttbox 16 534 370 30 390 "Feels ${FEELS}°  Hum ${HUMID}%
+Wind ${WINDSP}km/h"
 
-    ttbox 16 780 100 30 390 "Tmrw  ${MAXT1}/${MINT1}°
+    ttbox 16 654 250 30 390 "Tmrw  ${MAXT1}/${MINT1}°
 ${DAY2}   ${MAXT2}/${MINT2}°"
 
     # === RIGHT COLUMN ===
+    # Ofir 30..398, Jenny 404..772 — equal 368px blocks
 
-    ttbox 18 30 880 400 30 "Ofir" bold
+    ttbox 18 30 922 400 30 "Ofir" bold
 
-    ttbox 14 120 560 400 30 "$CAL_OFIR"
+    ttbox 14 102 626 400 30 "$CAL_OFIR"
 
-    ttbox 18 480 460 400 30 "Jenny" bold
+    ttbox 18 404 548 400 30 "Jenny" bold
 
-    ttbox 14 570 100 400 30 "$CAL_JENNY"
+    ttbox 14 476 252 400 30 "$CAL_JENNY"
+
+    # === HOURLY BAR (full width, 7 slots of 100px from x=30) ===
+    # Each row is one line, boxed at 3.375*size + 12 for headroom. Slot text
+    # is measured, not estimated: "18h" is 43px, "-25°" 59px and "Sunny"
+    # 64px against a 100px slot, so nothing wraps into a dropped line.
+
+    _I=0
+    while [ $_I -lt 7 ]; do
+        _L=$((30 + _I * 100))
+        _R=$((628 - _I * 100))
+        eval "_T=\$H${_I}T"
+        eval "_P=\$H${_I}P"
+        eval "_C=\$H${_I}C"
+        ttbox 12 774 196 "$_L" "$_R" "$_T"
+        ttbox 16 828 130 "$_L" "$_R" "${_P}°" bold
+        ttbox 11 894 80 "$_L" "$_R" "$_C"
+        _I=$((_I + 1))
+    done
 
     # === FOOTER ===
-    ttbox 12 960 10 30 30 "Updated: ${UPDATE_TIME}  |  ebook-dash"
+    ttbox 12 960 10 30 30 "Kingston, ON  |  Updated: ${UPDATE_TIME}  |  ebook-dash"
 
     $FBINK -s -f -W GC16 -q >> "$LOG" 2>&1
 
@@ -197,6 +288,7 @@ TEMP="--"; FEELS="--"; HUMID="--"; WINDSP="--"; DESC="No data"
 MAXT1="--"; MINT1="--"; MAXT2="--"; MINT2="--"; DAY2=""
 CAL_OFIR="Loading..."
 CAL_JENNY="Loading..."
+reset_hourly
 if check_online; then
     fetch_weather
     fetch_calendars
