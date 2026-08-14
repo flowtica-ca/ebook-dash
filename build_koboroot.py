@@ -40,12 +40,29 @@ sleep 20
 
 echo "ebook-dash" > /sys/power/wake_lock 2>/dev/null
 
+# The wireless interface is not wlan0 on every Kobo -- on several models
+# the WiFi driver claims eth0, and there is no wired ethernet to collide
+# with it. Hardcoding wlan0 made every ifconfig/wpa_cli/udhcpc call a
+# no-op against a nonexistent device, which is why the log showed "WiFi
+# down, reconnecting..." even on cycles whose fetch went on to succeed.
+detect_wifi_if() {
+    for _P in /sys/class/net/*; do
+        [ -d "$_P/wireless" ] && { echo "${_P##*/}"; return; }
+    done
+    for _N in wlan0 eth0 ra0 wlan1; do
+        [ -d "/sys/class/net/$_N" ] && { echo "$_N"; return; }
+    done
+    echo wlan0
+}
+
+WIFI_IF=$(detect_wifi_if)
+
 has_ip() {
-    ifconfig wlan0 2>/dev/null | grep -q "inet addr"
+    ifconfig "$WIFI_IF" 2>/dev/null | grep -q "inet addr"
 }
 
 wifi_state() {
-    wpa_cli -i wlan0 status 2>/dev/null | sed -n 's/^wpa_state=//p'
+    wpa_cli -i "$WIFI_IF" status 2>/dev/null | sed -n 's/^wpa_state=//p'
 }
 
 # wlan0 loses its IP between almost every fetch cycle on this device, so
@@ -56,18 +73,19 @@ wifi_state() {
 # then run DHCP, and report which half failed.
 # Worst case ~20s, well inside the 60s cycle.
 ensure_wifi() {
-    iwconfig wlan0 power off 2>/dev/null
+    iwconfig "$WIFI_IF" power off 2>/dev/null
     has_ip && return 0
 
-    echo "WiFi down, reconnecting..." >> "$LOG"
-    ifconfig wlan0 up 2>/dev/null
-    wpa_cli -i wlan0 reassociate 2>/dev/null
+    echo "WiFi down on ${WIFI_IF}, reconnecting..." >> "$LOG"
+    ifconfig "$WIFI_IF" up 2>/dev/null
+    wpa_cli -i "$WIFI_IF" reassociate 2>/dev/null
 
     _ST=$(wifi_state)
     if [ -z "$_ST" ]; then
-        # wpa_cli told us nothing to poll -- fall back to the old fixed wait
-        # rather than refusing to try DHCP at all.
+        # wpa_cli told us nothing to poll -- fall back to a fixed wait rather
+        # than refusing to try DHCP, but do NOT claim association below.
         sleep 3
+        _ASSOC="unverified (wpa_cli silent)"
     else
         _W=0
         while [ $_W -lt 12 ] && [ "$_ST" != "COMPLETED" ]; do
@@ -79,14 +97,18 @@ ensure_wifi() {
             echo "WiFi assoc stuck at ${_ST} after ${_W}s" >> "$LOG"
             return 1
         fi
-        echo "WiFi associated in ${_W}s" >> "$LOG"
+        _ASSOC="ok in ${_W}s"
     fi
 
-    udhcpc -i wlan0 -t 4 -T 2 -n -q 2>/dev/null
-    has_ip && return 0
-    echo "WiFi associated but no DHCP lease" >> "$LOG"
+    udhcpc -i "$WIFI_IF" -t 4 -T 2 -n -q 2>/dev/null
+    has_ip && { echo "WiFi up on ${WIFI_IF}, assoc ${_ASSOC}" >> "$LOG"; return 0; }
+    echo "WiFi still has no IP on ${WIFI_IF}, assoc ${_ASSOC}" >> "$LOG"
     return 1
 }
+
+# One-time, so a bad guess is visible in the log instead of silent.
+echo "Net: using ${WIFI_IF}; interfaces: $(ls /sys/class/net 2>/dev/null | tr '\n' ' ')" >> "$LOG"
+echo "Net: with-ip: $(ifconfig 2>/dev/null | grep -B1 'inet addr' | grep -o '^[a-z0-9]*' | tr '\n' ' ')" >> "$LOG"
 
 ensure_wifi
 
