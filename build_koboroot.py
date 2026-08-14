@@ -40,15 +40,52 @@ sleep 20
 
 echo "ebook-dash" > /sys/power/wake_lock 2>/dev/null
 
+has_ip() {
+    ifconfig wlan0 2>/dev/null | grep -q "inet addr"
+}
+
+wifi_state() {
+    wpa_cli -i wlan0 status 2>/dev/null | sed -n 's/^wpa_state=//p'
+}
+
+# wlan0 loses its IP between almost every fetch cycle on this device, so
+# this runs constantly rather than as a rare rescue. The previous fixed
+# `sleep 3` was usually too short for WPA association to finish, leaving
+# udhcpc to fire at an unassociated interface and burn its retries: the
+# log showed 3 successes in 55 attempts. Poll for association instead,
+# then run DHCP, and report which half failed.
+# Worst case ~20s, well inside the 60s cycle.
 ensure_wifi() {
     iwconfig wlan0 power off 2>/dev/null
-    if ! ifconfig wlan0 2>/dev/null | grep -q "inet addr"; then
-        echo "WiFi down, reconnecting..." >> "$LOG"
-        ifconfig wlan0 up 2>/dev/null
-        wpa_cli -i wlan0 reassociate 2>/dev/null
+    has_ip && return 0
+
+    echo "WiFi down, reconnecting..." >> "$LOG"
+    ifconfig wlan0 up 2>/dev/null
+    wpa_cli -i wlan0 reassociate 2>/dev/null
+
+    _ST=$(wifi_state)
+    if [ -z "$_ST" ]; then
+        # wpa_cli told us nothing to poll -- fall back to the old fixed wait
+        # rather than refusing to try DHCP at all.
         sleep 3
-        udhcpc -i wlan0 -t 3 -T 2 -q 2>/dev/null
+    else
+        _W=0
+        while [ $_W -lt 12 ] && [ "$_ST" != "COMPLETED" ]; do
+            sleep 1
+            _W=$((_W + 1))
+            _ST=$(wifi_state)
+        done
+        if [ "$_ST" != "COMPLETED" ]; then
+            echo "WiFi assoc stuck at ${_ST} after ${_W}s" >> "$LOG"
+            return 1
+        fi
+        echo "WiFi associated in ${_W}s" >> "$LOG"
     fi
+
+    udhcpc -i wlan0 -t 4 -T 2 -n -q 2>/dev/null
+    has_ip && return 0
+    echo "WiFi associated but no DHCP lease" >> "$LOG"
+    return 1
 }
 
 ensure_wifi
@@ -346,8 +383,9 @@ while true; do
     [ -f "$DISABLE" ] && exit 0
     CYCLE=$((CYCLE + 1))
     if [ $((CYCLE % 5)) -eq 0 ]; then
-        ensure_wifi
-        if check_online; then
+        # ensure_wifi now reports whether the link came back, so a known-down
+        # interface skips check_online's 5s probe instead of retrying it.
+        if ensure_wifi && check_online; then
             fetch_weather
             fetch_calendars
         else
