@@ -72,9 +72,31 @@ wifi_state() {
 # log showed 3 successes in 55 attempts. Poll for association instead,
 # then run DHCP, and report which half failed.
 # Worst case ~20s, well inside the 60s cycle.
+# wpa_cli is silent on this device, so when recovery fails we still do not
+# know what to restart. Capture the pieces that would say: is
+# wpa_supplicant running and with which config/control socket, what does
+# the driver think the link is doing, and is Nickel in USB mass-storage
+# mode -- which turns WiFi off by policy, not by fault.
+wifi_diag() {
+    _SUP=$(ps 2>/dev/null | grep "[w]pa_supplicant" | head -1 | sed 's/^ *//;s/   */ /g')
+    [ -z "$_SUP" ] && _SUP="not running"
+    _SOCK=$(ls /var/run/wpa_supplicant 2>/dev/null | tr '\n' ' ')
+    [ -z "$_SOCK" ] && _SOCK="(none)"
+    _CONF=$(ls /etc/wpa_supplicant/ 2>/dev/null | tr '\n' ' ')
+    [ -z "$_CONF" ] && _CONF="(none)"
+    if grep -q " /mnt/onboard " /proc/mounts 2>/dev/null; then
+        _USB="onboard-mounted"
+    else
+        _USB="onboard-UNMOUNTED(usb-mode)"
+    fi
+    echo "WiFiDiag: sup=[$_SUP]" >> "$LOG"
+    echo "WiFiDiag: sock=[$_SOCK] conf=[$_CONF] usb=$_USB" >> "$LOG"
+    echo "WiFiDiag: carrier=$(cat /sys/class/net/$WIFI_IF/carrier 2>/dev/null) oper=$(cat /sys/class/net/$WIFI_IF/operstate 2>/dev/null) iw=[$(iwconfig $WIFI_IF 2>/dev/null | tr '\n' ' ' | sed 's/   */ /g' | cut -c1-110)]" >> "$LOG"
+}
+
 ensure_wifi() {
     iwconfig "$WIFI_IF" power off 2>/dev/null
-    has_ip && return 0
+    has_ip && { _FAILN=0; return 0; }
 
     echo "WiFi down on ${WIFI_IF}, reconnecting..." >> "$LOG"
     ifconfig "$WIFI_IF" up 2>/dev/null
@@ -94,21 +116,35 @@ ensure_wifi() {
             _ST=$(wifi_state)
         done
         if [ "$_ST" != "COMPLETED" ]; then
-            echo "WiFi assoc stuck at ${_ST} after ${_W}s" >> "$LOG"
+            _FAILN=$((_FAILN + 1))
+            echo "WiFi assoc stuck at ${_ST} after ${_W}s (fail #${_FAILN})" >> "$LOG"
+            [ $_FAILN -le 3 ] || [ $((_FAILN % 12)) -eq 0 ] && wifi_diag
             return 1
         fi
         _ASSOC="ok in ${_W}s"
     fi
 
     udhcpc -i "$WIFI_IF" -t 4 -T 2 -n -q 2>/dev/null
-    has_ip && { echo "WiFi up on ${WIFI_IF}, assoc ${_ASSOC}" >> "$LOG"; return 0; }
-    echo "WiFi still has no IP on ${WIFI_IF}, assoc ${_ASSOC}" >> "$LOG"
+    if has_ip; then
+        echo "WiFi up on ${WIFI_IF}, assoc ${_ASSOC} (after ${_FAILN} fails)" >> "$LOG"
+        _FAILN=0
+        return 0
+    fi
+    # Detail on the first few failures and then periodically, so a long
+    # outage samples the state without filling the log.
+    _FAILN=$((_FAILN + 1))
+    echo "WiFi still has no IP on ${WIFI_IF}, assoc ${_ASSOC} (fail #${_FAILN})" >> "$LOG"
+    [ $_FAILN -le 3 ] || [ $((_FAILN % 12)) -eq 0 ] && wifi_diag
     return 1
 }
 
 # One-time, so a bad guess is visible in the log instead of silent.
 echo "Net: using ${WIFI_IF}; interfaces: $(ls /sys/class/net 2>/dev/null | tr '\n' ' ')" >> "$LOG"
 echo "Net: with-ip: $(ifconfig 2>/dev/null | grep -B1 'inet addr' | grep -o '^[a-z0-9]*' | tr '\n' ' ')" >> "$LOG"
+
+# Baseline while WiFi is still up, to compare against the failing samples.
+_FAILN=0
+wifi_diag
 
 ensure_wifi
 
